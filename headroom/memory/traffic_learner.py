@@ -64,7 +64,7 @@ _BASH_VOLATILE_SUFFIX_RE = re.compile(
 
 # Leading `cd <dir> && ` / `cd <dir>; ` prefixes. Agents prepend them to most
 # commands, so they carry no signal about which operation was retried.
-_BASH_LEADING_CD_RE = re.compile(r"""^\s*cd\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)\s*""")
+_BASH_LEADING_CD_RE = re.compile(r"""^\s*cd\s+(?:"[^"]*"|'[^']*'|(?:\\.|[^\s\\])+)\s*(?:&&|;)\s*""")
 
 # Agent harnesses can encode orchestration metadata as user-role messages.
 # These prefixes identify whole messages that are not authored by the user.

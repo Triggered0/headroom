@@ -1866,6 +1866,7 @@ class TestNormalizeBashForHash:
         # cd-prefixed recovery in a project onto one hash key.
         assert _normalize_bash_for_hash("cd /tmp && ls") == "ls"
         assert _normalize_bash_for_hash('cd "C:\\a b"; cd sub && cargo check') == "cargo check"
+        assert _normalize_bash_for_hash(r"cd /home/dev/my\ project && cargo check") == "cargo check"
         assert _normalize_bash_for_hash("cd /tmp") == "cd /tmp"
 
 
