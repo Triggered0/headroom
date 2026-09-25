@@ -714,6 +714,50 @@ class TestAntigravityDiscoveryAndParsing:
         assert len(user_events) == 1
         assert user_events[0].text == "Run lint"
 
+    def test_scan_skips_malformed_transcript_lines(self, tmp_path):
+        project_dir = tmp_path / "my-project"
+        project_dir.mkdir()
+
+        gemini_dir, logs_dir = _setup_antigravity_dir(tmp_path, "antigravity-cli")
+        lines = [
+            json.dumps(
+                {
+                    "step_index": 0,
+                    "source": "USER_EXPLICIT",
+                    "type": "USER_INPUT",
+                    "content": "<USER_REQUEST>\nRun lint\n</USER_REQUEST>",
+                }
+            ),
+            '{"step_index": 1, "source": "MODEL", "type": "PLAN',
+            json.dumps(
+                {
+                    "step_index": 2,
+                    "source": "MODEL",
+                    "type": "PLANNER_RESPONSE",
+                    "tool_calls": [
+                        {
+                            "name": "run_command",
+                            "args": {"CommandLine": "npm run lint", "Cwd": str(project_dir)},
+                        }
+                    ],
+                }
+            ),
+            # Partially written final line of a live append-only transcript
+            '{"step_index": 3, "source": "MODEL", "type": "GEN',
+        ]
+        (logs_dir / "transcript.jsonl").write_text("\n".join(lines))
+
+        scanner = GeminiScanner(gemini_dir=gemini_dir)
+        projects = scanner.discover_projects()
+        assert len(projects) == 1
+
+        sessions = scanner.scan_project(projects[0])
+        assert len(sessions) == 1
+        assert len(sessions[0].tool_calls) == 1
+        assert "npm run lint" in str(sessions[0].tool_calls[0].input_data)
+        user_events = [e for e in sessions[0].events if e.type == "user_message"]
+        assert [e.text for e in user_events] == ["Run lint"]
+
     def test_discovers_antigravity_project_from_workspace_mapping(self, tmp_path):
         project_dir = tmp_path / "workspace-proj"
         project_dir.mkdir()

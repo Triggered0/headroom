@@ -319,10 +319,17 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
         session_id = self._extract_antigravity_identity(transcript_path)
         session_timestamp: datetime | None = None
 
+        steps: list = []
         try:
             with open(transcript_path, encoding="utf-8", errors="replace") as f:
-                steps = [json.loads(line) for line in f if line.strip()]
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
+                for line in f:
+                    if not line.strip():
+                        continue
+                    try:
+                        steps.append(json.loads(line))
+                    except json.JSONDecodeError:
+                        continue
+        except (OSError, UnicodeDecodeError) as e:
             logger.debug("Failed to read Antigravity transcript %s: %s", transcript_path, e)
             return None
 
