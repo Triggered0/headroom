@@ -8,7 +8,7 @@ structured recommendations for CLAUDE.md / MEMORY.md.
 
 Supports any LLM provider via LiteLLM: Anthropic, OpenAI, Google, Bedrock,
 Ollama, and 100+ others. Auto-detects the best available model from env vars.
-Also supports CLI-based backends (claude, gemini, codex) for subscription
+Also supports CLI-based backends (claude, gemini, codex, agy) for subscription
 users without raw API keys.
 """
 
@@ -85,6 +85,9 @@ _CLI_BACKENDS: list[tuple[str, str, list[str]]] = [
     ),
     ("gemini", "gemini-cli", ["gemini", "-p"]),
     ("codex", "codex-cli", ["codex", "exec", "--skip-git-repo-check"]),
+    # agy's -p takes the prompt as an argument, so stdin is only read as a
+    # stream-json user event; the answer arrives in the final `result` event.
+    ("agy", "agy-cli", ["agy", "--input-format", "stream-json", "--output-format", "stream-json"]),
 ]
 
 # Set of valid CLI model identifiers, derived from _CLI_BACKENDS.
@@ -151,7 +154,7 @@ def _detect_default_model() -> str:
     Priority order:
       1. API key present → use corresponding LiteLLM model
       2. HEADROOM_LEARN_CLI env var → use specified CLI backend
-      3. Auto-detect installed CLI tools (claude > gemini > codex)
+      3. Auto-detect installed CLI tools (claude > gemini > codex > agy)
       4. Raise RuntimeError with setup instructions
     """
     # 1. API key detection (existing behavior)
@@ -182,7 +185,7 @@ def _detect_default_model() -> str:
         "  export ANTHROPIC_API_KEY=sk-ant-...   → uses claude-sonnet-4-6\n"
         "  export OPENAI_API_KEY=sk-...          → uses gpt-4o\n"
         "  export GEMINI_API_KEY=...             → uses gemini-flash-latest\n"
-        "Or set HEADROOM_LEARN_CLI to a coding agent CLI (claude, gemini, codex).\n"
+        "Or set HEADROOM_LEARN_CLI to a coding agent CLI (claude, gemini, codex, agy).\n"
         "Or install one of those CLIs for auto-detection.\n"
         "Or specify a model directly: headroom learn --model <litellm-model-name>"
     )
@@ -682,6 +685,8 @@ def _call_cli_llm(
                    --include-partial-messages (idle-timeout)
       gemini-cli → gemini -p (wall-clock timeout)
       codex-cli  → codex exec (wall-clock timeout)
+      agy-cli    → agy --input-format stream-json --output-format stream-json
+                   (wall-clock timeout)
 
     The claude-cli path streams JSON events, letting the analyzer kill genuine
     hangs while letting long-but-active analyses run to completion.
@@ -716,10 +721,14 @@ def _call_cli_llm(
             cmd, prompt, hard_cap=hard_cap, idle_cap=idle_cap, on_progress=on_progress
         )
 
+    stdin = prompt
+    if model == "agy-cli":
+        stdin = json.dumps({"event": "user", "message": {"content": prompt}}) + "\n"
+
     try:
         result = run(
             cmd,
-            input=prompt,
+            input=stdin,
             capture_output=True,
             text=True,
             timeout=hard_cap,
@@ -733,7 +742,7 @@ def _call_cli_llm(
             ) from None
         cmd = shim_cmd
         try:
-            result = run(cmd, input=prompt, capture_output=True, text=True, timeout=hard_cap)
+            result = run(cmd, input=stdin, capture_output=True, text=True, timeout=hard_cap)
         except FileNotFoundError:
             raise RuntimeError(
                 f"`{cmd[0]}` not found in PATH. Install it or use a different backend "
@@ -754,8 +763,12 @@ def _call_cli_llm(
     if result.stderr and result.stderr.strip():
         logger.debug("CLI stderr (exit 0): %s", result.stderr[:_MAX_SNIPPET_LEN])
 
+    output = result.stdout
+    if model == "agy-cli":
+        output = _agy_result_text(output)
+
     try:
-        return _strip_fenced_json(result.stdout)
+        return _strip_fenced_json(output)
     except json.JSONDecodeError as exc:
         stdout_snippet = _output_snippet(result.stdout or "")
         raise RuntimeError(
@@ -940,6 +953,17 @@ def _call_claude_cli_streaming(
             f"`{' '.join(cmd)}` returned unparseable output. "
             f"Head and tail of the output:\n{snippet}"
         ) from exc
+
+
+def _agy_result_text(stdout: str) -> str:
+    """Return ``result.response`` from agy stream-json output, or "" if absent."""
+    for line in reversed(stdout.splitlines()):
+        event = _parse_stream_event(line)
+        if event is not None and event.get("event") == "result":
+            result = event.get("result")
+            response = result.get("response") if isinstance(result, dict) else None
+            return response if isinstance(response, str) else ""
+    return ""
 
 
 def _parse_stream_event(line: str) -> dict | None:

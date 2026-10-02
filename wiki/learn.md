@@ -200,7 +200,7 @@ To keep the shaper on across proxy restarts, export both variables before starti
 | 1 | `--model` flag | `headroom learn --model gpt-4o` |
 | 2 | API key env var | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` |
 | 3 | `HEADROOM_LEARN_CLI` env var | `export HEADROOM_LEARN_CLI=gemini` |
-| 4 | Auto-detect installed CLIs | Checks PATH for `claude`, `gemini`, `codex` |
+| 4 | Auto-detect installed CLIs | Checks PATH for `claude`, `gemini`, `codex`, `agy` |
 
 ### Using without an API key
 
@@ -218,7 +218,7 @@ export HEADROOM_LEARN_CLI=codex
 headroom learn
 ```
 
-Valid values for `HEADROOM_LEARN_CLI`: `claude`, `gemini`, `codex`.
+Valid values for `HEADROOM_LEARN_CLI`: `claude`, `gemini`, `codex`, `agy`.
 
 ## Real-World Results
 
