@@ -957,7 +957,9 @@ def _call_claude_cli_streaming(
 
 def _agy_result_text(stdout: str) -> str:
     """Return ``result.response`` from agy stream-json output, or "" if absent."""
-    for line in reversed(stdout.splitlines()):
+    # Split on "\n" only: splitlines() also breaks on U+2028/U+2029, which JSON
+    # allows unescaped inside strings, and would cut the result event apart.
+    for line in reversed(stdout.split("\n")):
         event = _parse_stream_event(line)
         if event is not None and event.get("event") == "result":
             result = event.get("result")

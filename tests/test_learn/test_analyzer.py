@@ -1079,6 +1079,20 @@ class TestCallCliLlm:
         assert sent["message"]["content"].endswith("test digest")
 
     @patch("headroom.learn.analyzer.subprocess.run")
+    def test_agy_cli_result_with_unicode_line_separator(self, mock_run: MagicMock):
+        response = '{"context_file_rules": [], "memory_file_rules": [], "note": "a b"}'
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout=json.dumps(
+                {"event": "result", "result": {"response": response}}, ensure_ascii=False
+            )
+            + "\n",
+            stderr="",
+        )
+        result = _call_cli_llm("test digest", "agy-cli")
+        assert result["note"] == "a b"
+
+    @patch("headroom.learn.analyzer.subprocess.run")
     def test_agy_cli_missing_result_event_raises(self, mock_run: MagicMock):
         mock_run.return_value = MagicMock(
             returncode=0,
