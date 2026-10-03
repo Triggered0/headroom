@@ -204,7 +204,8 @@ def _detect_default_model() -> str:
         "  export OPENAI_API_KEY=sk-...          → uses gpt-4o\n"
         "  export GEMINI_API_KEY=...             → uses gemini-flash-latest\n"
         "Or set HEADROOM_LEARN_CLI to a coding agent CLI (claude, gemini, codex, agy).\n"
-        "Or install one of those CLIs for auto-detection.\n"
+        "  agy is never auto-detected and also needs HEADROOM_LEARN_ALLOW_UNSAFE_AGY=1.\n"
+        "Or install claude, gemini, or codex for auto-detection.\n"
         "Or specify a model directly: headroom learn --model <litellm-model-name>"
     )
 
