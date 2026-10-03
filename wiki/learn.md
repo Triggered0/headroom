@@ -200,7 +200,7 @@ To keep the shaper on across proxy restarts, export both variables before starti
 | 1 | `--model` flag | `headroom learn --model gpt-4o` |
 | 2 | API key env var | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` |
 | 3 | `HEADROOM_LEARN_CLI` env var | `export HEADROOM_LEARN_CLI=gemini` |
-| 4 | Auto-detect installed CLIs | Checks PATH for `claude`, `gemini`, `codex`, `agy` |
+| 4 | Auto-detect installed CLIs | Checks PATH for `claude`, `gemini`, `codex` |
 
 ### Using without an API key
 
@@ -219,6 +219,16 @@ headroom learn
 ```
 
 Valid values for `HEADROOM_LEARN_CLI`: `claude`, `gemini`, `codex`, `agy`.
+
+`agy` (Antigravity CLI) is never auto-detected. It has no mode that starts a session without tools, so instructions embedded in analyzed session text could make it write files or run shell commands with your permissions. To use it anyway, opt in explicitly:
+
+```bash
+export HEADROOM_LEARN_CLI=agy
+export HEADROOM_LEARN_ALLOW_UNSAFE_AGY=1
+headroom learn
+```
+
+Without `HEADROOM_LEARN_ALLOW_UNSAFE_AGY=1`, selecting `agy` (via `HEADROOM_LEARN_CLI` or `--model agy-cli`) fails before any analysis runs.
 
 ## Real-World Results
 
