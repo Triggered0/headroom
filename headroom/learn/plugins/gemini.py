@@ -269,6 +269,10 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
         """
         brain_dir = next((p for p in transcript_path.parents if p.name == "brain"), None)
         app_dir = brain_dir.parent if brain_dir else None
+
+        def is_workspace(p: Path) -> bool:
+            return not (app_dir is not None and p.is_relative_to(app_dir)) and path_exists(p)
+
         cwd_counts: Counter[Path] = Counter()
         try:
             with open(transcript_path, encoding="utf-8", errors="replace") as f:
@@ -295,7 +299,7 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
                             m = re.search(pattern, content)
                             if m:
                                 p = Path(m.group(1).strip().strip("[]'\""))
-                                if path_exists(p):
+                                if is_workspace(p):
                                     return p
 
                     tool_calls = step.get("tool_calls")
@@ -316,12 +320,7 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
         except (OSError, UnicodeDecodeError):
             pass
 
-        for cwd, _ in cwd_counts.most_common():
-            if app_dir is not None and cwd.is_relative_to(app_dir):
-                continue
-            if path_exists(cwd):
-                return cwd
-        return None
+        return next((cwd for cwd, _ in cwd_counts.most_common() if is_workspace(cwd)), None)
 
     @staticmethod
     def _extract_antigravity_identity(transcript_path: Path) -> str:

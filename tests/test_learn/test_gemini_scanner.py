@@ -1260,6 +1260,29 @@ class TestAntigravityProjectDetection:
 
         assert scratch not in [p.project_path for p in projects]
 
+    def test_declared_workspace_inside_antigravity_data_dir_is_not_a_project(self, tmp_path):
+        app = tmp_path / "app"
+        app.mkdir()
+        gemini_dir, logs_dir = _setup_antigravity_dir(tmp_path)
+        scratch = logs_dir.parent.parent / "scratch"
+        scratch.mkdir()
+        _write_transcript(
+            logs_dir,
+            [
+                {
+                    "step_index": 0,
+                    "source": "USER_EXPLICIT",
+                    "type": "USER_INPUT",
+                    "content": f"Workspace: {scratch}",
+                },
+                _run_command_step(1, "npm test", app),
+            ],
+        )
+
+        projects = GeminiScanner(gemini_dir=gemini_dir).discover_projects()
+
+        assert [p.project_path for p in projects] == [app]
+
 
 class TestAntigravityUnmappedTranscripts:
     def test_pathless_transcripts_are_kept_out_of_mapped_projects(self, tmp_path):
