@@ -910,10 +910,11 @@ class TestAntigravityDiscoveryAndParsing:
         assert len(projects) == 1
         proj = projects[0]
         assert proj.project_path == project_dir
-        assert len(proj.data_paths) == 3
-        assert chats_dir in proj.data_paths
-        assert (gemini_dir / "antigravity-cli" / "brain") in proj.data_paths
-        assert (gemini_dir / "antigravity-ide" / "brain") in proj.data_paths
+        data_paths = [proj.data_path, *proj.extra_data_paths]
+        assert len(data_paths) == 3
+        assert chats_dir in data_paths
+        assert (gemini_dir / "antigravity-cli" / "brain") in data_paths
+        assert (gemini_dir / "antigravity-ide" / "brain") in data_paths
 
         # Scan project aggregates all 5 sessions across all 3 locations
         sessions = scanner.scan_project(proj)

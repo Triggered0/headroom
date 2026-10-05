@@ -111,7 +111,6 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
                             name=project_dir.name,
                             project_path=Path.cwd(),
                             data_path=chats_dir,
-                            data_paths=[chats_dir],
                             context_file=None,
                             memory_file=None,
                         )
@@ -153,15 +152,14 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
                     context_file = candidate_agents
 
             data_paths = info["data_paths"]
-            primary_data_path = data_paths[0] if data_paths else proj_path
             projects.append(
                 ProjectInfo(
                     name=info["name"],
                     project_path=proj_path,
-                    data_path=primary_data_path,
+                    data_path=data_paths[0] if data_paths else proj_path,
                     context_file=context_file,
                     memory_file=None,
-                    data_paths=data_paths,
+                    extra_data_paths=data_paths[1:],
                 )
             )
 
@@ -172,7 +170,7 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
         self, project: ProjectInfo, max_workers: int = 1, include_subagents: bool = True
     ) -> list[SessionData]:
         """Scan all session files for a project (Gemini CLI and/or Antigravity)."""
-        paths = project.data_paths if project.data_paths else [project.data_path]
+        paths = [project.data_path, *project.extra_data_paths]
         scan_items: list[tuple[Path, Callable[[Path], SessionData | None]]] = []
         seen_files: set[Path] = set()
 
