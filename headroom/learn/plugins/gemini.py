@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from collections import Counter
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +27,13 @@ from ..writer import ContextWriter, GeminiWriter
 from ._paths import path_exists
 
 logger = logging.getLogger(__name__)
+
+# Antigravity tool argument names -> the shared schema ToolCall.input_summary reads.
+_ANTIGRAVITY_ARG_ALIASES = {
+    "CommandLine": "command",
+    "AbsolutePath": "file_path",
+    "DirectoryPath": "path",
+}
 
 
 class GeminiPlugin(LearnPlugin, ConversationScanner):
@@ -117,6 +125,7 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
                     )
 
         # 2. Antigravity CLI and IDE projects (~/.gemini/antigravity-*/brain/)
+        unmapped_transcripts: list[Path] = []
         for agy_dir in (self.antigravity_cli_dir, self.antigravity_ide_dir):
             brain_dir = agy_dir / "brain"
             if not brain_dir.exists():
@@ -139,6 +148,8 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
                     )
                     if brain_dir not in entry["data_paths"]:
                         entry["data_paths"].append(brain_dir)
+                else:
+                    unmapped_transcripts.append(tf)
 
         projects: list[ProjectInfo] = []
         for proj_path, info in discovered.items():
@@ -164,6 +175,21 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
             )
 
         projects.extend(unmapped_projects)
+
+        # Conversations with no detectable workspace learn into the global
+        # ~/.gemini/GEMINI.md instead of being guessed into some project.
+        if unmapped_transcripts:
+            global_context = self.gemini_dir / "GEMINI.md"
+            projects.append(
+                ProjectInfo(
+                    name="antigravity (no workspace)",
+                    project_path=self.gemini_dir,
+                    data_path=unmapped_transcripts[0],
+                    context_file=global_context if path_exists(global_context) else None,
+                    memory_file=None,
+                    extra_data_paths=unmapped_transcripts[1:],
+                )
+            )
         return projects
 
     def scan_project(
@@ -203,10 +229,7 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
                 transcripts = sorted(p.rglob("transcript.jsonl"))
                 for tf in transcripts:
                     if tf not in seen_files:
-                        detected = self._detect_antigravity_project_path(tf)
-                        if detected == project.project_path or (
-                            detected is None and len(transcripts) == 1
-                        ):
+                        if self._detect_antigravity_project_path(tf) == project.project_path:
                             seen_files.add(tf)
                             scan_items.append((tf, self._scan_antigravity_transcript))
 
@@ -235,7 +258,18 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
 
     @staticmethod
     def _detect_antigravity_project_path(transcript_path: Path) -> Path | None:
-        """Extract project path from an Antigravity transcript."""
+        """Extract the workspace an Antigravity transcript belongs to.
+
+        A workspace declared in a user step wins; otherwise the most frequent
+        command ``Cwd`` does. Search and listing targets are not workspaces,
+        and tool output is never parsed for paths: it routinely echoes
+        unrelated ``Workspace:`` or ``path ->`` text (git output, file bodies).
+        Directories inside Antigravity's own data dir (per-conversation
+        scratch folders) are never a project.
+        """
+        brain_dir = next((p for p in transcript_path.parents if p.name == "brain"), None)
+        app_dir = brain_dir.parent if brain_dir else None
+        cwd_counts: Counter[Path] = Counter()
         try:
             with open(transcript_path, encoding="utf-8", errors="replace") as f:
                 for line in f:
@@ -249,6 +283,21 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
                     if not isinstance(step, dict):
                         continue
 
+                    content = step.get("content")
+                    if isinstance(content, str) and (
+                        step.get("type") == "USER_INPUT"
+                        or step.get("source") in ("USER_EXPLICIT", "USER_SYSTEM")
+                    ):
+                        for pattern in (
+                            r"([A-Za-z]:[\\/][^\r\n\t]+?|/[^\r\n\t]+?)\s*->",
+                            r"Workspace:\s*([^\r\n]+)",
+                        ):
+                            m = re.search(pattern, content)
+                            if m:
+                                p = Path(m.group(1).strip().strip("[]'\""))
+                                if path_exists(p):
+                                    return p
+
                     tool_calls = step.get("tool_calls")
                     if isinstance(tool_calls, list):
                         for tc in tool_calls:
@@ -261,27 +310,17 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
                                 except json.JSONDecodeError:
                                     args = {}
                             if isinstance(args, dict):
-                                for key in ("Cwd", "SearchDirectory", "DirectoryPath"):
-                                    val = args.get(key)
-                                    if isinstance(val, str) and val.strip():
-                                        p = Path(val.strip("\"'"))
-                                        if path_exists(p):
-                                            return p
-
-                    content = step.get("content")
-                    if isinstance(content, str):
-                        m = re.search(r"([A-Za-z]:[\\/][^\r\n\t]+?|/[^\r\n\t]+?)\s*->", content)
-                        if m:
-                            p = Path(m.group(1).strip().strip("[]'\""))
-                            if path_exists(p):
-                                return p
-                        m_ws = re.search(r"Workspace:\s*([^\r\n]+)", content)
-                        if m_ws:
-                            p = Path(m_ws.group(1).strip().strip("[]'\""))
-                            if path_exists(p):
-                                return p
+                                cwd = args.get("Cwd")
+                                if isinstance(cwd, str) and cwd.strip():
+                                    cwd_counts[Path(cwd.strip().strip("\"'"))] += 1
         except (OSError, UnicodeDecodeError):
             pass
+
+        for cwd, _ in cwd_counts.most_common():
+            if app_dir is not None and cwd.is_relative_to(app_dir):
+                continue
+            if path_exists(cwd):
+                return cwd
         return None
 
     @staticmethod
@@ -369,6 +408,9 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
 
             # Model tool calls
             elif step.get("tool_calls"):
+                # Each planner step's results follow it directly, so calls
+                # still pending here were interrupted and never got a result.
+                pending_tool_calls.clear()
                 tcs = step.get("tool_calls")
                 if isinstance(tcs, list):
                     for tc_item in tcs:
@@ -385,6 +427,10 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
                                 raw_args = {"raw": raw_args}
                         elif not isinstance(raw_args, dict):
                             raw_args = {}
+                        if isinstance(raw_args, dict):
+                            for agy_key, shared_key in _ANTIGRAVITY_ARG_ALIASES.items():
+                                if agy_key in raw_args:
+                                    raw_args.setdefault(shared_key, raw_args[agy_key])
 
                         tc = ToolCall(
                             name=tool_name,
@@ -407,8 +453,10 @@ class GeminiPlugin(LearnPlugin, ConversationScanner):
                         )
                         msg_idx += 1
 
-            # Output / error matching
-            elif pending_tool_calls:
+            # Output / error matching. Only model-sourced execution steps carry
+            # tool output; planner commentary, system notices and API errors
+            # must not consume a pending call.
+            elif pending_tool_calls and source == "MODEL" and step_type != "PLANNER_RESPONSE":
                 status = step.get("status", "")
                 is_err = status == "ERROR"
                 tc = pending_tool_calls.pop(0)
